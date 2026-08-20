@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>LoopBack — round-trip run planner</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="map"></div>
+
+  <!-- Planning panel -->
+  <div class="panel" id="plan-panel">
+    <div class="panel-header">
+      <span class="logo-dot"></span>
+      <div>
+        <div class="panel-title">LoopBack</div>
+        <div class="tagline">run a loop, land back where you started</div>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <label for="distance">Distance</label>
+      <div class="input-wrap">
+        <input type="number" id="distance" min="1" max="42" step="0.5" value="5">
+        <span class="unit">km</span>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <label for="tolerance">Tolerance</label>
+      <div class="input-wrap">
+        <select id="tolerance">
+          <option value="0.05">±5%</option>
+          <option value="0.10" selected>±10%</option>
+          <option value="0.15">±15%</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="btn-grid">
+      <button id="btn-locate" class="btn btn-ghost">
+        <span class="btn-icon">📍</span>My location
+      </button>
+      <button id="btn-avoid" class="btn btn-ghost" aria-pressed="false" title="Drop markers on roads you want the route to avoid">
+        <span class="btn-icon">⛔</span>Avoid roads
+      </button>
+      <button id="btn-generate" class="btn btn-primary" disabled>
+        <span class="btn-icon">✦</span>Generate route
+      </button>
+      <button id="btn-variation" class="btn btn-ghost" disabled>
+        <span class="btn-icon">↻</span>Try another
+      </button>
+      <button id="btn-start" class="btn btn-go btn-wide" disabled>
+        <span class="btn-icon">▶</span>Start run
+      </button>
+      <button id="btn-runs" class="btn btn-ghost btn-wide">
+        <span class="btn-icon">🏃</span>My runs<span id="runs-count" class="count-badge" hidden></span>
+      </button>
+    </div>
+
+    <div class="hint" id="hint">Tap the map to set your start point, or use My location.</div>
+    <div class="route-summary" id="route-summary" hidden></div>
+
+    <details class="settings">
+      <summary>⚙ Settings</summary>
+      <div class="field-row">
+        <label for="ors-key">ORS key</label>
+        <div class="input-wrap">
+          <input type="password" id="ors-key" placeholder="optional" autocomplete="off">
+        </div>
+      </div>
+      <div class="hint">A free API key from <a href="https://openrouteservice.org" target="_blank" rel="noopener">openrouteservice.org</a> unlocks proper walking routes, true round-trips and hard street avoidance. Stored only in this browser.</div>
+    </details>
+  </div>
+
+  <!-- Navigation panel (shown during a run) -->
+  <div class="panel nav-panel" id="nav-panel" hidden>
+    <div class="nav-instruction" id="nav-instruction">Head off</div>
+    <div class="nav-distance" id="nav-distance">—</div>
+    <div class="nav-progress-bar"><div class="nav-progress-fill" id="nav-progress-fill"></div></div>
+    <div class="nav-stats">
+      <span id="nav-done">0.00 km done</span>
+      <span id="nav-time" class="nav-time">0:00</span>
+      <span id="nav-remaining">— km to go</span>
+    </div>
+    <div class="nav-offroute" id="nav-offroute" hidden>⚠ Off route — finding you a way back…</div>
+    <div class="btn-grid btn-grid-3">
+      <button id="btn-mute" class="btn btn-ghost"><span class="btn-icon">🔊</span>Voice</button>
+      <button id="btn-simulate" class="btn btn-ghost"><span class="btn-icon">🧪</span>Simulate</button>
+      <button id="btn-stop" class="btn btn-danger"><span class="btn-icon">■</span>End run</button>
+    </div>
+  </div>
+
+  <!-- Run summary (shown when a run ends) -->
+  <div class="panel nav-panel" id="summary-panel" hidden>
+    <div class="summary-title" id="summary-title">🏁 Loop complete</div>
+    <div class="summary-stats">
+      <div class="stat"><div class="stat-value" id="sum-dist">—</div><div class="stat-label">distance</div></div>
+      <div class="stat"><div class="stat-value" id="sum-time">—</div><div class="stat-label">time</div></div>
+      <div class="stat"><div class="stat-value" id="sum-pace">—</div><div class="stat-label">pace</div></div>
+    </div>
+    <div class="btn-grid">
+      <button id="btn-save-run" class="btn btn-primary"><span class="btn-icon">💾</span>Save run</button>
+      <button id="btn-discard-run" class="btn btn-ghost"><span class="btn-icon">✕</span>Discard</button>
+    </div>
+  </div>
+
+  <!-- Saved runs -->
+  <div class="panel" id="runs-panel" hidden>
+    <div class="panel-header">
+      <span class="logo-dot"></span>
+      <div>
+        <div class="panel-title">My runs</div>
+        <div class="tagline">saved on this device</div>
+      </div>
+    </div>
+    <div id="runs-list" class="runs-list"></div>
+    <div class="btn-grid">
+      <button id="btn-runs-back" class="btn btn-ghost btn-wide"><span class="btn-icon">←</span>Back</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
