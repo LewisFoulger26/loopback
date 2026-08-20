@@ -4,7 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>LoopBack — round-trip run planner</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#4f46e5">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="vendor/leaflet.css">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -36,6 +42,17 @@
           <option value="0.05">±5%</option>
           <option value="0.10" selected>±10%</option>
           <option value="0.15">±15%</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="field-row">
+      <label for="terrain">Terrain</label>
+      <div class="input-wrap">
+        <select id="terrain">
+          <option value="flat">As flat as possible</option>
+          <option value="any" selected>Don't mind</option>
+          <option value="hilly">Give me hills</option>
         </select>
       </div>
     </div>
@@ -97,10 +114,11 @@
   <!-- Run summary (shown when a run ends) -->
   <div class="panel nav-panel" id="summary-panel" hidden>
     <div class="summary-title" id="summary-title">🏁 Loop complete</div>
-    <div class="summary-stats">
+    <div class="summary-stats summary-stats-4">
       <div class="stat"><div class="stat-value" id="sum-dist">—</div><div class="stat-label">distance</div></div>
       <div class="stat"><div class="stat-value" id="sum-time">—</div><div class="stat-label">time</div></div>
       <div class="stat"><div class="stat-value" id="sum-pace">—</div><div class="stat-label">pace</div></div>
+      <div class="stat"><div class="stat-value" id="sum-climb">—</div><div class="stat-label">climb</div></div>
     </div>
     <div class="btn-grid">
       <button id="btn-save-run" class="btn btn-primary"><span class="btn-icon">💾</span>Save run</button>
@@ -116,6 +134,12 @@
         <div class="panel-title">My runs</div>
         <div class="tagline">saved on this device</div>
       </div>
+    </div>
+    <div class="summary-stats summary-stats-4" id="runs-stats">
+      <div class="stat"><div class="stat-value" id="stat-week">—</div><div class="stat-label">this week</div></div>
+      <div class="stat"><div class="stat-value" id="stat-total">—</div><div class="stat-label">total</div></div>
+      <div class="stat"><div class="stat-value" id="stat-best">—</div><div class="stat-label">best pace</div></div>
+      <div class="stat"><div class="stat-value" id="stat-longest">—</div><div class="stat-label">longest</div></div>
     </div>
     <div id="runs-list" class="runs-list"></div>
     <div class="btn-grid">
@@ -136,15 +160,19 @@
       <div class="help-section">Planning</div>
       <div class="help-item"><span class="help-icon">📍</span><div><strong>My location</strong> — sets your start/finish point from GPS. You can also just tap anywhere on the map.</div></div>
       <div class="help-item"><span class="help-icon">⛔</span><div><strong>Avoid roads</strong> — toggles avoid mode: tap any road you don't want to run down and a red marker appears; regenerate to apply. Tap a marker again to remove it.</div></div>
-      <div class="help-item"><span class="help-icon">✦</span><div><strong>Generate route</strong> — builds a loop matching your distance within the chosen tolerance, starting and finishing at your start point.</div></div>
+      <div class="help-item"><span class="help-icon">⛰</span><div><strong>Terrain</strong> — "as flat as possible" or "give me hills" makes the generator compare candidate loops by real elevation data and pick accordingly. The route's total climb is shown either way.</div></div>
+      <div class="help-item"><span class="help-icon">✦</span><div><strong>Generate route</strong> — builds a loop matching your distance within the chosen tolerance, starting and finishing at your start point. Quieter streets are automatically preferred over A- and B-roads, and the summary flags how much of the loop is on main roads.</div></div>
       <div class="help-item"><span class="help-icon">↻</span><div><strong>Try another</strong> — re-rolls the loop in a different direction if you fancy different scenery.</div></div>
       <div class="help-item"><span class="help-icon">▶</span><div><strong>Start run</strong> — begins sat-nav guidance: spoken turns as you approach them, distance to next turn, elapsed time and progress. Drift off course and it automatically routes you back (orange dashed line). The screen stays awake during a run.</div></div>
-      <div class="help-item"><span class="help-icon">🏃</span><div><strong>My runs</strong> — your saved history on this device. 👁 shows that run's route on the map; 🗑 deletes it (asks first).</div></div>
+      <div class="help-item"><span class="help-icon">🏃</span><div><strong>My runs</strong> — your saved history on this device, topped by your totals and records: this week's distance, all-time distance, best pace and longest run (simulated runs don't count). 👁 shows that run's route on the map; ⬇ downloads it as a GPX file you can import into Strava or Garmin; 🗑 deletes it (asks first).</div></div>
       <div class="help-item"><span class="help-icon">⚙</span><div><strong>Settings</strong> — paste a free openrouteservice.org API key to switch to proper walking routes with hard road avoidance.</div></div>
       <div class="help-section">During a run</div>
       <div class="help-item"><span class="help-icon">🔊</span><div><strong>Voice</strong> — mutes or unmutes the spoken directions and kilometre splits.</div></div>
       <div class="help-item"><span class="help-icon">🧪</span><div><strong>Simulate</strong> — previews the whole guided run with a phantom runner, no GPS needed. Saved simulated runs are tagged <em>sim</em>.</div></div>
-      <div class="help-item"><span class="help-icon">■</span><div><strong>End run</strong> — stops the run and shows your distance, time and pace, with the option to save or discard.</div></div>
+      <div class="help-item"><span class="help-icon">■</span><div><strong>End run</strong> — stops the run and shows your distance, time, pace and climb, with the option to save or discard.</div></div>
+      <div class="help-section">On your phone</div>
+      <div class="help-item"><span class="help-icon">📲</span><div><strong>Install as an app</strong> — open the browser menu and choose <em>Add to Home Screen</em> (Android: Chrome menu → "Install app"; iPhone: Share → "Add to Home Screen"). LoopBack then opens full-screen like a normal app, and the app itself loads even without signal — though the map, route generation and elevation data still need a connection.</div></div>
+      <div class="help-item"><span class="help-icon">🔆</span><div><strong>During a run</strong> the screen stays awake so GPS guidance isn't cut off, and each kilometre is announced with your average pace.</div></div>
     </div>
     <div class="btn-grid">
       <button id="btn-help-back" class="btn btn-ghost btn-wide"><span class="btn-icon">←</span>Back</button>
@@ -153,7 +181,7 @@
 
   <div class="toast" id="toast" hidden></div>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="vendor/leaflet.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

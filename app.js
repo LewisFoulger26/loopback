@@ -238,11 +238,23 @@ async function fetchRoute(points) {
   return data.routes[0];
 }
 
+// Fraction of the route on numbered main roads (A-roads weighted fully,
+// B-roads at 40%) — used to prefer quieter loops.
+function busyWeight(refOrName) {
+  if (/(^|[^A-Za-z0-9])A\d+/.test(refOrName)) return 1;
+  if (/(^|[^A-Za-z0-9])B\d+/.test(refOrName)) return 0.4;
+  return 0;
+}
+
 function parseRoute(osrmRoute) {
   const coords = osrmRoute.geometry.coordinates.map(([lng, lat]) => ({ lat, lng }));
   const cumDist = buildCumDist(coords);
   const steps = [];
+  let busyM = 0;
   for (const leg of osrmRoute.legs) {
+    for (const s of leg.steps) {
+      busyM += busyWeight(`${s.ref || ""} ${s.name || ""}`) * (s.distance || 0);
+    }
     for (const s of leg.steps) {
       // Intermediate waypoint "arrive"/"depart" pairs are artefacts of the
       // loop's shaping points, not real turns — drop them.
@@ -257,7 +269,36 @@ function parseRoute(osrmRoute) {
       });
     }
   }
-  return { distance: osrmRoute.distance, coords, cumDist, steps, provider: "OSRM" };
+  return {
+    distance: osrmRoute.distance, coords, cumDist, steps,
+    busyFrac: osrmRoute.distance ? busyM / osrmRoute.distance : 0,
+    provider: "OSRM",
+  };
+}
+
+// Total ascent in metres, from the free Open-Meteo elevation API (no key).
+async function fetchAscent(coords) {
+  const n = Math.min(80, coords.length);
+  const idxs = Array.from({ length: n }, (_, i) =>
+    Math.floor((i * (coords.length - 1)) / (n - 1))
+  );
+  const lats = idxs.map((i) => coords[i].lat.toFixed(5)).join(",");
+  const lngs = idxs.map((i) => coords[i].lng.toFixed(5)).join(",");
+  const res = await fetch(
+    `https://api.open-meteo.com/v1/elevation?latitude=${lats}&longitude=${lngs}`
+  );
+  if (!res.ok) throw new Error("elevation unavailable");
+  const e = (await res.json()).elevation;
+  // light smoothing, then sum the positive deltas
+  const sm = e.map((v, i) =>
+    i > 0 && i < e.length - 1 ? (e[i - 1] + v + e[i + 1]) / 3 : v
+  );
+  let ascent = 0;
+  for (let i = 1; i < sm.length; i++) {
+    const d = sm[i] - sm[i - 1];
+    if (d > 0.5) ascent += d;
+  }
+  return Math.round(ascent);
 }
 
 // --- OpenRouteService (optional, key required) -----------------------------
@@ -300,8 +341,10 @@ function parseOrsRoute(feat) {
   const coords = feat.geometry.coordinates.map(([lng, lat]) => ({ lat, lng }));
   const cumDist = buildCumDist(coords);
   const steps = [];
+  let busyM = 0;
   for (const seg of feat.properties.segments) {
     for (const s of seg.steps) {
+      busyM += busyWeight(s.name || "") * (s.distance || 0);
       const loc = coords[s.way_points[0]];
       steps.push({
         loc,
@@ -312,9 +355,10 @@ function parseOrsRoute(feat) {
       });
     }
   }
+  const distance = feat.properties.summary.distance;
   return {
-    distance: feat.properties.summary.distance,
-    coords, cumDist, steps,
+    distance, coords, cumDist, steps,
+    busyFrac: distance ? busyM / distance : 0,
     provider: "OpenRouteService (walking)",
   };
 }
@@ -375,39 +419,81 @@ async function osrmLoop(origin, targetM, tolerance, bearing) {
   return best;
 }
 
+// Gather candidate loops, then pick the winner on a combined score:
+// distance accuracy first, then avoid-marker hits, quiet roads, and the
+// terrain preference (flat/hilly) using real elevation data.
 async function generateLoopRoute(origin, targetM, tolerance) {
-  // ORS path: native round-trip generator, hard avoidance; try a few seeds.
+  const terrain = $("terrain").value; // flat | any | hilly
+  const candidates = [];
+  let lastError = null;
+
   if (orsKey) {
     const firstSeed = Math.floor(Math.random() * 1000);
-    let best = null;
     for (let i = 0; i < 4; i++) {
-      const feat = await orsRoundTrip(origin, targetM, firstSeed + i * 37);
-      const parsed = parseOrsRoute(feat);
-      const err = Math.abs(parsed.distance - targetM) / targetM;
-      if (!best || err < best.err) best = { parsed, err, hits: 0 };
-      if (err <= tolerance) break;
+      try {
+        const parsed = parseOrsRoute(await orsRoundTrip(origin, targetM, firstSeed + i * 37));
+        const err = Math.abs(parsed.distance - targetM) / targetM;
+        candidates.push({ parsed, err, hits: 0 });
+        if (err <= tolerance && terrain === "any") break;
+      } catch (err) {
+        lastError = err;
+      }
     }
-    return best;
+  } else {
+    const first = Math.random() * 360;
+    const nBearings = avoidPoints.length ? 6 : 3;
+    for (let i = 0; i < nBearings; i++) {
+      const bearing = (first + (360 / nBearings) * i) % 360;
+      try {
+        const result = await osrmLoop(origin, targetM, tolerance, bearing);
+        candidates.push(result);
+        // With no terrain preference, a clean quiet in-tolerance loop is
+        // good enough — stop searching.
+        if (terrain === "any" && result.err <= tolerance && result.hits === 0 &&
+            result.parsed.busyFrac < 0.1) break;
+      } catch (err) {
+        lastError = err;
+      }
+    }
   }
 
-  // OSRM path: try several directions; first in-tolerance clean loop wins,
-  // otherwise the best-scoring candidate.
-  const first = Math.random() * 360;
-  const nBearings = avoidPoints.length ? 6 : 3;
-  let best = null;
-  let lastError = null;
-  for (let i = 0; i < nBearings; i++) {
-    const bearing = (first + (360 / nBearings) * i) % 360;
-    try {
-      const result = await osrmLoop(origin, targetM, tolerance, bearing);
-      if (!best || result.score < best.score) best = result;
-      if (result.err <= tolerance && result.hits === 0) break;
-    } catch (err) {
-      lastError = err;
+  if (!candidates.length) throw lastError || new Error("Could not build a loop from here");
+
+  // Elevation is a rate-limited free service: with no terrain preference only
+  // the winner needs it (for display); with a preference, every candidate does.
+  if (terrain !== "any") {
+    for (const c of candidates) {
+      try {
+        c.ascent = await fetchAscent(c.parsed.coords);
+      } catch {
+        c.ascent = null; // service busy — terrain scoring just no-ops
+      }
     }
   }
-  if (!best) throw lastError || new Error("Could not build a loop from here");
-  return best;
+
+  for (const c of candidates) {
+    let score =
+      (c.err <= tolerance ? c.err * 0.5 : 1 + c.err * 2) +
+      (c.hits || 0) * 10 +
+      (c.parsed.busyFrac || 0) * 0.3;
+    if (c.ascent != null && terrain !== "any") {
+      const perKm = Math.min(40, c.ascent / (c.parsed.distance / 1000));
+      score += terrain === "flat" ? perKm * 0.012 : -perKm * 0.012;
+    }
+    c.score = score;
+  }
+  candidates.sort((a, b) => a.score - b.score);
+
+  const winner = candidates[0];
+  if (winner.ascent === undefined) {
+    try {
+      winner.ascent = await fetchAscent(winner.parsed.coords);
+    } catch {
+      winner.ascent = null;
+    }
+  }
+  winner.terrainSkipped = terrain !== "any" && candidates.every((c) => c.ascent == null);
+  return winner;
 }
 
 // ---------------------------------------------------------------------------
@@ -493,8 +579,9 @@ async function onGenerate() {
   btn.disabled = true;
   btn.innerHTML = '<span class="btn-icon">…</span>Working';
   try {
-    const { parsed, err, hits } = await generateLoopRoute(start, targetM, tolerance);
+    const { parsed, err, hits, ascent, terrainSkipped } = await generateLoopRoute(start, targetM, tolerance);
     route = parsed;
+    route.ascent = ascent ?? null;
     drawRoute();
     const summary = $("route-summary");
     summary.hidden = false;
@@ -504,6 +591,10 @@ async function onGenerate() {
         ? `within ±${Math.round(tolerance * 100)}% ✅`
         : `${Math.round(err * 100)}% off target — closest found; try another or widen the tolerance`
     );
+    if (route.ascent != null) bits.push(`↗ ${route.ascent} m climb`);
+    if (terrainSkipped) bits.push("⚠ elevation service busy — terrain preference skipped");
+    if (route.busyFrac >= 0.1) bits.push(`⚠ ${Math.round(route.busyFrac * 100)}% on main roads`);
+    else bits.push("quiet roads ✅");
     if (hits > 0) bits.push(`⚠ couldn't fully dodge ${hits} avoided road${hits > 1 ? "s" : ""}`);
     else if (avoidPoints.length) bits.push("avoided roads dodged ✅");
     bits.push(`<span class="provider">via ${route.provider}</span>`);
@@ -731,6 +822,7 @@ function endRun(completed) {
     elapsedS: Math.round(elapsedS),
     completed,
     sim: usedSim,
+    climbM: route.ascent ?? null,
     coords: route.coords.map((c) => [
       Math.round(c.lat * 1e5) / 1e5,
       Math.round(c.lng * 1e5) / 1e5,
@@ -740,6 +832,7 @@ function endRun(completed) {
   $("sum-dist").textContent = fmtKm(distanceM);
   $("sum-time").textContent = fmtElapsed(elapsedS);
   $("sum-pace").textContent = fmtPace(distanceM, elapsedS);
+  $("sum-climb").textContent = route.ascent != null ? `${route.ascent} m` : "—";
   $("summary-panel").hidden = false;
 }
 
@@ -811,6 +904,66 @@ function locateMe() {
 // Saved runs UI
 // ---------------------------------------------------------------------------
 
+// GPX export with timestamps spread along the track by distance, so imports
+// into Strava/Garmin carry the run's real duration and pace.
+function runToGpx(run) {
+  const coords = run.coords.map(([lat, lng]) => ({ lat, lng }));
+  const cum = buildCumDist(coords);
+  // Partial runs stored the whole planned loop — trim to the distance covered.
+  let end = cum.findIndex((d) => d > run.distanceM);
+  if (end === -1) end = coords.length;
+  const used = coords.slice(0, Math.max(2, end));
+  const usedCum = cum.slice(0, Math.max(2, end));
+  const totalLen = usedCum.at(-1) || 1;
+  const startT = new Date(run.date).getTime() - run.elapsedS * 1000;
+  const pts = used
+    .map((c, i) => {
+      const t = new Date(startT + run.elapsedS * 1000 * (usedCum[i] / totalLen));
+      return `      <trkpt lat="${c.lat}" lon="${c.lng}"><time>${t.toISOString()}</time></trkpt>`;
+    })
+    .join("\n");
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="LoopBack" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk>
+    <name>LoopBack run ${fmtDate(run.date)}</name>
+    <trkseg>
+${pts}
+    </trkseg>
+  </trk>
+</gpx>`;
+}
+
+function downloadRunGpx(run) {
+  const blob = new Blob([runToGpx(run)], { type: "application/gpx+xml" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `loopback-${run.date.slice(0, 10)}-${(run.distanceM / 1000).toFixed(1)}km.gpx`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+// Records & totals shown at the top of My runs; simulated runs are excluded.
+function renderRunStats(runs) {
+  const real = runs.filter((r) => !r.sim);
+  const now = new Date();
+  const monday = new Date(now);
+  monday.setHours(0, 0, 0, 0);
+  monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+  const weekM = real
+    .filter((r) => new Date(r.date) >= monday)
+    .reduce((s, r) => s + r.distanceM, 0);
+  const totalM = real.reduce((s, r) => s + r.distanceM, 0);
+  const eligible = real.filter((r) => r.distanceM >= 1000);
+  const best = eligible.length
+    ? eligible.reduce((a, b) => (a.elapsedS / a.distanceM < b.elapsedS / b.distanceM ? a : b))
+    : null;
+  const longest = real.length ? Math.max(...real.map((r) => r.distanceM)) : 0;
+  $("stat-week").textContent = (weekM / 1000).toFixed(1) + " km";
+  $("stat-total").textContent = (totalM / 1000).toFixed(1) + " km";
+  $("stat-best").textContent = best ? fmtPace(best.distanceM, best.elapsedS).replace(" /km", "") : "—";
+  $("stat-longest").textContent = longest ? fmtKm(longest) : "—";
+}
+
 function clearViewedRun() {
   if (viewedRunLine) { map.removeLayer(viewedRunLine); viewedRunLine = null; }
   viewedRunId = null;
@@ -839,6 +992,7 @@ function deleteRun(run) {
 function renderRuns() {
   const list = $("runs-list");
   const runs = loadRuns();
+  renderRunStats(runs);
   list.innerHTML = "";
   if (!runs.length) {
     list.innerHTML = '<div class="runs-empty">No runs saved yet — finish a loop and hit 💾 Save run.</div>';
@@ -852,6 +1006,7 @@ function renderRuns() {
     meta.className = "run-meta";
     meta.innerHTML =
       `<strong>${fmtKm(run.distanceM)}</strong> · ${fmtElapsed(run.elapsedS)} · ${fmtPace(run.distanceM, run.elapsedS)}` +
+      (run.climbM != null ? ` · ↗${run.climbM} m` : "") +
       (run.completed ? "" : " · partial") +
       (run.sim ? '<span class="sim-tag">sim</span>' : "") +
       `<br><span class="run-date">${fmtDate(run.date)}</span>`;
@@ -865,13 +1020,19 @@ function renderRuns() {
     view.textContent = "👁";
     view.addEventListener("click", () => viewRun(run));
 
+    const gpx = document.createElement("button");
+    gpx.className = "icon-btn";
+    gpx.title = "Download GPX (for Strava, Garmin, etc.)";
+    gpx.textContent = "⬇";
+    gpx.addEventListener("click", () => downloadRunGpx(run));
+
     const del = document.createElement("button");
     del.className = "icon-btn danger";
     del.title = "Delete run";
     del.textContent = "🗑";
     del.addEventListener("click", () => deleteRun(run));
 
-    actions.append(view, del);
+    actions.append(view, gpx, del);
     item.append(meta, actions);
     list.appendChild(item);
   }
@@ -954,6 +1115,12 @@ function init() {
       ? '<span class="btn-icon">🔊</span>Voice'
       : '<span class="btn-icon">🔇</span>Muted';
   });
+
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("./sw.js").catch(() => {
+      // e.g. file:// or an unsupported browser — the app still works online
+    });
+  }
 }
 
 init();

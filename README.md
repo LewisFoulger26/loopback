@@ -5,9 +5,13 @@ Round-trip run planner. Set your start point, tell it how far you want to run, a
 ## Features
 
 - **Loop generation to a target distance** with ±5/10/15% tolerance — works in cities and rural areas alike (tested in central Manchester, the Yorkshire Dales and the Peak District).
+- **Terrain preference**: "as flat as possible" or "give me hills" compares candidate loops by real elevation data (Open-Meteo, no key) and picks accordingly; total climb is shown on every route and saved run.
+- **Route quality scoring**: quieter streets are automatically preferred — candidate loops are penalised by the fraction of distance on A-roads (fully) and B-roads (partially), and the summary flags "quiet roads ✅" or "⚠ n% on main roads".
 - **Avoid roads**: toggle ⛔ Avoid mode and tap any road you don't want to run down; the generator produces loops that dodge those spots (hard exclusion with an ORS key, score-and-re-roll without one). Tap a marker again to remove it.
-- **Turn-by-turn voice navigation** (en-GB speech): pre-announcements ("In 150 metres, turn left…"), distance to next turn, progress bar, km done / to go.
+- **Turn-by-turn voice navigation** (en-GB speech): pre-announcements ("In 150 metres, turn left…"), distance to next turn, elapsed time, progress bar, km done / to go, and per-km split announcements with average pace.
 - **Automatic re-routing**: drift off the loop and it fetches a connector route back (orange dashed line), guides you along it, then resumes the main directions at the right turn.
+- **Run history**: every run ends with a distance/time/pace/climb summary you can save. My runs shows records and totals (this week, all-time, best pace, longest — sim runs excluded), and each run can be viewed on the map, exported as **GPX** (timestamped, imports into Strava/Garmin) or deleted.
+- **Installable PWA**: manifest + service worker with the app shell cached (Leaflet is vendored locally), so *Add to Home Screen* gives a full-screen app that opens offline; a screen wake lock keeps GPS alive during runs.
 - **Simulate mode**: previews the whole guided run with a phantom runner, no GPS needed.
 
 ## Routing engines

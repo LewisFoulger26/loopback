@@ -313,6 +313,10 @@ html, body {
   margin-bottom: 6px;
 }
 
+.summary-stats-4 { grid-template-columns: repeat(4, 1fr); }
+
+.summary-stats-4 .stat-value { font-size: 0.98rem; }
+
 .stat {
   background: #f4f6fa;
   border: 1px solid rgba(16, 24, 40, 0.06);
