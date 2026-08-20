@@ -31,7 +31,7 @@
       <label for="distance">Distance</label>
       <div class="input-wrap">
         <input type="number" id="distance" min="1" max="42" step="0.5" value="5">
-        <span class="unit">km</span>
+        <span class="unit" id="distance-unit">km</span>
       </div>
     </div>
 
@@ -84,6 +84,15 @@
     <details class="settings">
       <summary>⚙ Settings</summary>
       <div class="field-row">
+        <label for="units">Units</label>
+        <div class="input-wrap">
+          <select id="units">
+            <option value="metric">km / metres</option>
+            <option value="imperial">miles / yards</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-row">
         <label for="ors-key">ORS key</label>
         <div class="input-wrap">
           <input type="password" id="ors-key" placeholder="optional" autocomplete="off">
@@ -95,8 +104,22 @@
 
   <!-- Navigation panel (shown during a run) -->
   <div class="panel nav-panel" id="nav-panel" hidden>
-    <div class="nav-instruction" id="nav-instruction">Head off</div>
-    <div class="nav-distance" id="nav-distance">—</div>
+    <div class="nav-main">
+      <div class="nav-arrow" id="nav-arrow">
+        <svg viewBox="0 0 24 24" id="nav-arrow-svg"><path d="M12 2.5l6.5 7.5h-4.2v11.5h-4.6V10H5.5z"/></svg>
+        <span id="nav-arrow-sym" hidden></span>
+      </div>
+      <div class="nav-texts">
+        <div class="nav-instruction" id="nav-instruction">Head off</div>
+        <div class="nav-distance" id="nav-distance">—</div>
+      </div>
+    </div>
+    <div class="nav-then" id="nav-then" hidden>then
+      <span class="nav-then-arrow">
+        <svg viewBox="0 0 24 24" id="nav-then-svg"><path d="M12 2.5l6.5 7.5h-4.2v11.5h-4.6V10H5.5z"/></svg>
+        <span id="nav-then-sym" hidden></span>
+      </span>
+    </div>
     <div class="nav-progress-bar"><div class="nav-progress-fill" id="nav-progress-fill"></div></div>
     <div class="nav-stats">
       <span id="nav-done">0.00 km done</span>
@@ -163,9 +186,9 @@
       <div class="help-item"><span class="help-icon">⛰</span><div><strong>Terrain</strong> — "as flat as possible" or "give me hills" makes the generator compare candidate loops by real elevation data and pick accordingly. The route's total climb is shown either way.</div></div>
       <div class="help-item"><span class="help-icon">✦</span><div><strong>Generate route</strong> — builds a loop matching your distance within the chosen tolerance, starting and finishing at your start point. Quieter streets are automatically preferred over A- and B-roads, and the summary flags how much of the loop is on main roads.</div></div>
       <div class="help-item"><span class="help-icon">↻</span><div><strong>Try another</strong> — re-rolls the loop in a different direction if you fancy different scenery.</div></div>
-      <div class="help-item"><span class="help-icon">▶</span><div><strong>Start run</strong> — begins sat-nav guidance: spoken turns as you approach them, distance to next turn, elapsed time and progress. Drift off course and it automatically routes you back (orange dashed line). The screen stays awake during a run.</div></div>
+      <div class="help-item"><span class="help-icon">▶</span><div><strong>Start run</strong> — begins sat-nav guidance. A large arrow shows which way the next corner goes, with a live countdown that turns amber as you get close, and a small dot marks the junction on the map. When two turns come in quick succession a "then" preview shows the one after. Everything is also spoken as you approach. Drift off course and it automatically routes you back (orange dashed line). The screen stays awake during a run.</div></div>
       <div class="help-item"><span class="help-icon">🏃</span><div><strong>My runs</strong> — your saved history on this device, topped by your totals and records: this week's distance, all-time distance, best pace and longest run (simulated runs don't count). 👁 shows that run's route on the map; ⬇ downloads it as a GPX file you can import into Strava or Garmin; 🗑 deletes it (asks first).</div></div>
-      <div class="help-item"><span class="help-icon">⚙</span><div><strong>Settings</strong> — paste a free openrouteservice.org API key to switch to proper walking routes with hard road avoidance.</div></div>
+      <div class="help-item"><span class="help-icon">⚙</span><div><strong>Settings</strong> — choose your units (km/metres or miles/yards — affects distances, turn callouts, pace and split announcements), and optionally paste a free openrouteservice.org API key to switch to proper walking routes with hard road avoidance.</div></div>
       <div class="help-section">During a run</div>
       <div class="help-item"><span class="help-icon">🔊</span><div><strong>Voice</strong> — mutes or unmutes the spoken directions and kilometre splits.</div></div>
       <div class="help-item"><span class="help-icon">🧪</span><div><strong>Simulate</strong> — previews the whole guided run with a phantom runner, no GPS needed. Saved simulated runs are tagged <em>sim</em>.</div></div>

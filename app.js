@@ -30,6 +30,8 @@ let simTimer = null;
 let voiceOn = true;
 let nav = null;            // {idx, preAnnounced, rejoin, offRouteSince, ...}
 let orsKey = localStorage.getItem("loopback-ors-key") || "";
+let units = localStorage.getItem("loopback-units") || "metric"; // metric | imperial
+let turnMarker = null;     // dot on the map at the next manoeuvre
 let navTimer = null;       // updates the elapsed-time display each second
 let wakeLock = null;       // keeps the phone screen on during a run
 let pendingRun = null;     // stats awaiting Save/Discard on the summary panel
@@ -128,12 +130,35 @@ function buildCumDist(coords) {
 // Formatting
 // ---------------------------------------------------------------------------
 
-const fmtKm = (m) => (m / 1000).toFixed(2) + " km";
+const MILE = 1609.344;
+const YARD = 0.9144;
 
+// Large distances: "5.13 km" or "3.19 mi" depending on the units setting.
+function fmtKm(m) {
+  return units === "imperial" ? (m / MILE).toFixed(2) + " mi" : (m / 1000).toFixed(2) + " km";
+}
+
+function fmtKmShort(m) {
+  return units === "imperial" ? (m / MILE).toFixed(1) + " mi" : (m / 1000).toFixed(1) + " km";
+}
+
+// Turn countdowns, rounded like a sat-nav: 50s when far, 10s when close.
 function fmtMetres(m) {
+  if (units === "imperial") {
+    const yd = m / YARD;
+    if (yd >= 900) return (m / MILE).toFixed(1) + " mi";
+    if (yd >= 100) return Math.round(yd / 50) * 50 + " yd";
+    return Math.max(10, Math.round(yd / 10) * 10) + " yd";
+  }
   if (m >= 950) return (m / 1000).toFixed(1) + " km";
   if (m >= 100) return Math.round(m / 50) * 50 + " m";
   return Math.max(10, Math.round(m / 10) * 10) + " m";
+}
+
+function spokenTurnDist(m) {
+  return fmtMetres(m)
+    .replace(" yd", " yards").replace(" mi", " miles")
+    .replace(" m", " metres").replace(" km", " kilometres");
 }
 
 const lowerFirst = (s) => s.charAt(0).toLowerCase() + s.slice(1);
@@ -150,7 +175,8 @@ function fmtElapsed(sec) {
 
 function fmtPace(distanceM, elapsedS) {
   if (distanceM < 100) return "—";
-  return fmtElapsed(elapsedS / (distanceM / 1000)) + " /km";
+  const unitM = units === "imperial" ? MILE : 1000;
+  return fmtElapsed(elapsedS / (distanceM / unitM)) + (units === "imperial" ? " /mi" : " /km");
 }
 
 function fmtDate(iso) {
@@ -184,6 +210,29 @@ function updateRunsBadge() {
   badge.hidden = n === 0;
   badge.textContent = n;
 }
+
+// Arrow rotation (degrees clockwise from straight-ahead) per OSRM modifier.
+const MODIFIER_ROT = {
+  straight: 0, "slight left": -45, left: -90, "sharp left": -135,
+  uturn: 180, "sharp right": 135, right: 90, "slight right": 45,
+};
+
+// {rot} rotates the arrow; {sym} swaps it for a symbol (roundabout, finish).
+function osrmGlyph(step) {
+  const t = step.maneuver.type;
+  if (t === "roundabout" || t === "rotary") return { sym: "⟳" };
+  if (t === "arrive") return { sym: "🏁" };
+  if (t === "depart") return { rot: 0 };
+  return { rot: MODIFIER_ROT[step.maneuver.modifier] ?? 0 };
+}
+
+// ORS instruction type codes → glyphs.
+const ORS_GLYPH = {
+  0: { rot: -90 }, 1: { rot: 90 }, 2: { rot: -135 }, 3: { rot: 135 },
+  4: { rot: -45 }, 5: { rot: 45 }, 6: { rot: 0 }, 7: { sym: "⟳" },
+  8: { sym: "⟳" }, 9: { rot: 180 }, 10: { sym: "🏁" }, 11: { rot: 0 },
+  12: { rot: -45 }, 13: { rot: 45 },
+};
 
 const MODIFIER_TEXT = {
   "sharp left": "sharp left", left: "left", "slight left": "slightly left",
@@ -251,6 +300,20 @@ function parseRoute(osrmRoute) {
   const cumDist = buildCumDist(coords);
   const steps = [];
   let busyM = 0;
+  // Steps arrive in route order, so match each manoeuvre to the geometry by
+  // scanning forward from the previous one — a loop that revisits a street
+  // would otherwise pin a step to the wrong pass.
+  let searchFrom = 0;
+  const alongOf = (loc) => {
+    let bestJ = searchFrom, bestD = Infinity;
+    for (let j = searchFrom; j < coords.length; j++) {
+      const d = haversine(loc, coords[j]);
+      if (d < bestD) { bestD = d; bestJ = j; }
+      if (d < 1) break;
+    }
+    searchFrom = bestJ;
+    return cumDist[bestJ];
+  };
   for (const leg of osrmRoute.legs) {
     for (const s of leg.steps) {
       busyM += busyWeight(`${s.ref || ""} ${s.name || ""}`) * (s.distance || 0);
@@ -263,9 +326,10 @@ function parseRoute(osrmRoute) {
       const loc = { lat: s.maneuver.location[1], lng: s.maneuver.location[0] };
       steps.push({
         loc,
-        along: locateOnCoords(loc, coords, cumDist).along,
+        along: alongOf(loc),
         instruction: stepInstruction(s),
         type: s.maneuver.type,
+        ...osrmGlyph(s),
       });
     }
   }
@@ -352,6 +416,7 @@ function parseOrsRoute(feat) {
         instruction:
           s.type === 10 ? "You have arrived back at your start point" : s.instruction,
         type: s.type === 10 ? "arrive" : "",
+        ...(ORS_GLYPH[s.type] || { rot: 0 }),
       });
     }
   }
@@ -571,7 +636,7 @@ function drawRoute() {
 
 async function onGenerate() {
   if (!start) return;
-  const targetM = parseFloat($("distance").value) * 1000;
+  const targetM = parseFloat($("distance").value) * (units === "imperial" ? MILE : 1000);
   const tolerance = parseFloat($("tolerance").value);
   if (!(targetM > 0)) { toast("Enter a distance first"); return; }
 
@@ -629,6 +694,44 @@ function updateUserMarker(pos, accuracy) {
   }
 }
 
+function applyGlyph(svgId, symId, step) {
+  const svg = $(svgId), sym = $(symId);
+  if (step.sym) {
+    svg.setAttribute("hidden", "");
+    sym.hidden = false;
+    sym.textContent = step.sym;
+  } else {
+    svg.removeAttribute("hidden");
+    sym.hidden = true;
+    svg.style.transform = `rotate(${step.rot || 0}deg)`;
+  }
+}
+
+// The at-a-glance turn display: big direction arrow, countdown (amber when the
+// corner is close), a "then" preview when another turn follows within 250 m,
+// and a dot on the map at the junction itself.
+function setTurnUI(step, dText, steps, idx, near = false) {
+  $("nav-instruction").textContent = step.instruction;
+  const dEl = $("nav-distance");
+  dEl.textContent = dText;
+  dEl.classList.toggle("near", near);
+  applyGlyph("nav-arrow-svg", "nav-arrow-sym", step);
+
+  const next = steps[idx + 1];
+  const closeNext = !!next && step.along != null && next.along != null &&
+    next.along - step.along < 250;
+  $("nav-then").hidden = !closeNext;
+  if (closeNext) applyGlyph("nav-then-svg", "nav-then-sym", next);
+
+  if (!turnMarker) {
+    turnMarker = L.circleMarker(step.loc, {
+      radius: 7, color: "#4f46e5", weight: 3, fillColor: "#fff", fillOpacity: 1,
+    }).addTo(map);
+  } else {
+    turnMarker.setLatLng(step.loc);
+  }
+}
+
 // Advance through a guidance step list; returns "finished" when its last step
 // (an "arrive") has been announced.
 function advanceSteps(guide, pos, announcePrefix = "") {
@@ -637,18 +740,16 @@ function advanceSteps(guide, pos, announcePrefix = "") {
     const d = haversine(pos, step.loc);
 
     if (d > 45) {
-      $("nav-instruction").textContent = step.instruction;
-      $("nav-distance").textContent = fmtMetres(d);
+      setTurnUI(step, fmtMetres(d), guide.steps, guide.idx, d < 100);
       if (!guide.preAnnounced && d < 160) {
-        speak(`${announcePrefix}In ${fmtMetres(d).replace(" m", " metres")}, ${lowerFirst(step.instruction)}`);
+        speak(`${announcePrefix}In ${spokenTurnDist(d)}, ${lowerFirst(step.instruction)}`);
         guide.preAnnounced = true;
       }
       return "ongoing";
     }
 
     speak(step.instruction);
-    $("nav-instruction").textContent = step.instruction;
-    $("nav-distance").textContent = "Now";
+    setTurnUI(step, "Now", guide.steps, guide.idx, true);
     guide.idx++;
     guide.preAnnounced = false;
     if (step.type === "arrive" || guide.idx >= guide.steps.length) return "finished";
@@ -747,13 +848,15 @@ function releaseWakeLock() {
 }
 
 function announceKmSplit() {
-  const km = Math.floor(nav.maxAlong / 1000);
-  if (km <= (nav.lastKmAnnounced || 0)) return;
-  nav.lastKmAnnounced = km;
+  const unitM = units === "imperial" ? MILE : 1000;
+  const unitName = units === "imperial" ? "mile" : "kilometre";
+  const n = Math.floor(nav.maxAlong / unitM);
+  if (n <= (nav.lastKmAnnounced || 0)) return;
+  nav.lastKmAnnounced = n;
   const elapsedS = (Date.now() - nav.startedAt) / 1000;
-  const paceS = Math.round(elapsedS / (nav.maxAlong / 1000));
+  const paceS = Math.round(elapsedS / (nav.maxAlong / unitM));
   const m = Math.floor(paceS / 60), s = paceS % 60;
-  speak(`${km} kilometre${km > 1 ? "s" : ""} done. Average pace ${m} minutes ${s ? s : ""} per kilometre.`);
+  speak(`${n} ${unitName}${n > 1 ? "s" : ""} done. Average pace ${m} minutes ${s ? s : ""} per ${unitName}.`);
 }
 
 function startRun() {
@@ -771,9 +874,9 @@ function startRun() {
   navTimer = setInterval(() => {
     if (nav) $("nav-time").textContent = fmtElapsed((Date.now() - nav.startedAt) / 1000);
   }, 1000);
-  $("nav-instruction").textContent = route.steps[0]?.instruction || "Head off";
-  $("nav-distance").textContent = "—";
-  speak(`Starting your ${fmtKm(route.distance).replace(" km", " kilometre")} loop. ${route.steps[0]?.instruction || "Head off"}.`);
+  if (route.steps[0]) setTurnUI(route.steps[0], "—", route.steps, 0);
+  const spokenDist = fmtKm(route.distance).replace(" km", " kilometre").replace(" mi", " mile");
+  speak(`Starting your ${spokenDist} loop. ${route.steps[0]?.instruction || "Head off"}.`);
 
   if ("geolocation" in navigator) {
     watchId = navigator.geolocation.watchPosition(
@@ -806,6 +909,7 @@ function endRun(completed) {
   if (simTimer) { clearInterval(simTimer); simTimer = null; $("btn-simulate").innerHTML = '<span class="btn-icon">🧪</span>Simulate'; }
   if (navTimer) { clearInterval(navTimer); navTimer = null; }
   releaseWakeLock();
+  if (turnMarker) { map.removeLayer(turnMarker); turnMarker = null; }
   clearRejoin(false);
   nav = null;
   $("nav-panel").hidden = true;
@@ -958,9 +1062,9 @@ function renderRunStats(runs) {
     ? eligible.reduce((a, b) => (a.elapsedS / a.distanceM < b.elapsedS / b.distanceM ? a : b))
     : null;
   const longest = real.length ? Math.max(...real.map((r) => r.distanceM)) : 0;
-  $("stat-week").textContent = (weekM / 1000).toFixed(1) + " km";
-  $("stat-total").textContent = (totalM / 1000).toFixed(1) + " km";
-  $("stat-best").textContent = best ? fmtPace(best.distanceM, best.elapsedS).replace(" /km", "") : "—";
+  $("stat-week").textContent = fmtKmShort(weekM);
+  $("stat-total").textContent = fmtKmShort(totalM);
+  $("stat-best").textContent = best ? fmtPace(best.distanceM, best.elapsedS).replace(/ \/(km|mi)/, "") : "—";
   $("stat-longest").textContent = longest ? fmtKm(longest) : "—";
 }
 
@@ -1074,6 +1178,23 @@ function init() {
     if (nav) return;
     if (avoidMode) addAvoidPoint(e.latlng);
     else setStart(e.latlng);
+  });
+
+  $("units").value = units;
+  $("distance-unit").textContent = units === "imperial" ? "mi" : "km";
+  $("units").addEventListener("change", (e) => {
+    const old = units;
+    units = e.target.value;
+    localStorage.setItem("loopback-units", units);
+    // Convert the distance field so the target stays the same length.
+    const dist = $("distance");
+    const val = parseFloat(dist.value);
+    if (val && old !== units) {
+      dist.value = (units === "imperial" ? (val * 1000) / MILE : (val * MILE) / 1000).toFixed(1);
+    }
+    $("distance-unit").textContent = units === "imperial" ? "mi" : "km";
+    if (!$("runs-panel").hidden) renderRuns();
+    toast(units === "imperial" ? "Miles and yards it is 🇬🇧" : "Kilometres and metres it is");
   });
 
   $("ors-key").value = orsKey;

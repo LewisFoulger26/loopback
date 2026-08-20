@@ -2,7 +2,9 @@
  * instantly and works offline. Map tiles, routing and elevation requests are
  * cross-origin and always go to the network. */
 
-const CACHE = "loopback-v1";
+// Bump this with every deploy that changes shell files — installed clients
+// refresh their cache when the new worker activates.
+const CACHE = "loopback-v2";
 const SHELL = [
   "./",
   "./index.html",
