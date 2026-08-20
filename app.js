@@ -31,6 +31,7 @@ let voiceOn = true;
 let nav = null;            // {idx, preAnnounced, rejoin, offRouteSince, ...}
 let orsKey = localStorage.getItem("loopback-ors-key") || "";
 let navTimer = null;       // updates the elapsed-time display each second
+let wakeLock = null;       // keeps the phone screen on during a run
 let pendingRun = null;     // stats awaiting Save/Discard on the summary panel
 let viewedRunLine = null;  // polyline of a saved run being viewed
 let viewedRunId = null;
@@ -608,6 +609,7 @@ function onPositionUpdate(pos, accuracy) {
   const onRoute = locateOnRoute(pos);
   const done = onRoute.along;
   nav.maxAlong = Math.max(nav.maxAlong || 0, done);
+  announceKmSplit();
   const remaining = Math.max(0, route.distance - done);
   $("nav-done").textContent = fmtKm(done) + " done";
   $("nav-remaining").textContent = fmtKm(remaining) + " to go";
@@ -640,12 +642,37 @@ function onPositionUpdate(pos, accuracy) {
   if (advanceSteps(nav, pos) === "finished") finishRun();
 }
 
+async function acquireWakeLock() {
+  try {
+    if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen");
+  } catch {
+    // Not supported or denied — the run still works, the screen just may dim.
+  }
+}
+
+function releaseWakeLock() {
+  wakeLock?.release?.();
+  wakeLock = null;
+}
+
+function announceKmSplit() {
+  const km = Math.floor(nav.maxAlong / 1000);
+  if (km <= (nav.lastKmAnnounced || 0)) return;
+  nav.lastKmAnnounced = km;
+  const elapsedS = (Date.now() - nav.startedAt) / 1000;
+  const paceS = Math.round(elapsedS / (nav.maxAlong / 1000));
+  const m = Math.floor(paceS / 60), s = paceS % 60;
+  speak(`${km} kilometre${km > 1 ? "s" : ""} done. Average pace ${m} minutes ${s ? s : ""} per kilometre.`);
+}
+
 function startRun() {
   if (!route) return;
   nav = {
     steps: route.steps, idx: 0, preAnnounced: false, rejoin: null,
     offRouteSince: null, startedAt: Date.now(), maxAlong: 0, usedSim: false,
+    lastKmAnnounced: 0,
   };
+  acquireWakeLock();
   $("plan-panel").hidden = true;
   $("summary-panel").hidden = true;
   $("nav-panel").hidden = false;
@@ -687,6 +714,7 @@ function endRun(completed) {
   if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
   if (simTimer) { clearInterval(simTimer); simTimer = null; $("btn-simulate").innerHTML = '<span class="btn-icon">🧪</span>Simulate'; }
   if (navTimer) { clearInterval(navTimer); navTimer = null; }
+  releaseWakeLock();
   clearRejoin(false);
   nav = null;
   $("nav-panel").hidden = true;
@@ -905,6 +933,19 @@ function init() {
   $("btn-discard-run").addEventListener("click", () => closeSummary(false));
   $("btn-runs").addEventListener("click", openRuns);
   $("btn-runs-back").addEventListener("click", closeRuns);
+  $("btn-help").addEventListener("click", () => {
+    $("plan-panel").hidden = true;
+    $("help-panel").hidden = false;
+  });
+  $("btn-help-back").addEventListener("click", () => {
+    $("help-panel").hidden = true;
+    $("plan-panel").hidden = false;
+  });
+  // Wake locks are released when the tab is backgrounded — take it back when
+  // the runner returns to the app mid-run.
+  document.addEventListener("visibilitychange", () => {
+    if (nav && document.visibilityState === "visible") acquireWakeLock();
+  });
   updateRunsBadge();
   $("btn-mute").addEventListener("click", () => {
     voiceOn = !voiceOn;

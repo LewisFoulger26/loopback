@@ -18,6 +18,7 @@
         <div class="panel-title">LoopBack</div>
         <div class="tagline">run a loop, land back where you started</div>
       </div>
+      <button id="btn-help" class="icon-btn help-btn" title="Help — what each button does">?</button>
     </div>
 
     <div class="field-row">
@@ -119,6 +120,34 @@
     <div id="runs-list" class="runs-list"></div>
     <div class="btn-grid">
       <button id="btn-runs-back" class="btn btn-ghost btn-wide"><span class="btn-icon">←</span>Back</button>
+    </div>
+  </div>
+
+  <!-- Help -->
+  <div class="panel" id="help-panel" hidden>
+    <div class="panel-header">
+      <span class="logo-dot"></span>
+      <div>
+        <div class="panel-title">Help</div>
+        <div class="tagline">what each button does</div>
+      </div>
+    </div>
+    <div class="help-list">
+      <div class="help-section">Planning</div>
+      <div class="help-item"><span class="help-icon">📍</span><div><strong>My location</strong> — sets your start/finish point from GPS. You can also just tap anywhere on the map.</div></div>
+      <div class="help-item"><span class="help-icon">⛔</span><div><strong>Avoid roads</strong> — toggles avoid mode: tap any road you don't want to run down and a red marker appears; regenerate to apply. Tap a marker again to remove it.</div></div>
+      <div class="help-item"><span class="help-icon">✦</span><div><strong>Generate route</strong> — builds a loop matching your distance within the chosen tolerance, starting and finishing at your start point.</div></div>
+      <div class="help-item"><span class="help-icon">↻</span><div><strong>Try another</strong> — re-rolls the loop in a different direction if you fancy different scenery.</div></div>
+      <div class="help-item"><span class="help-icon">▶</span><div><strong>Start run</strong> — begins sat-nav guidance: spoken turns as you approach them, distance to next turn, elapsed time and progress. Drift off course and it automatically routes you back (orange dashed line). The screen stays awake during a run.</div></div>
+      <div class="help-item"><span class="help-icon">🏃</span><div><strong>My runs</strong> — your saved history on this device. 👁 shows that run's route on the map; 🗑 deletes it (asks first).</div></div>
+      <div class="help-item"><span class="help-icon">⚙</span><div><strong>Settings</strong> — paste a free openrouteservice.org API key to switch to proper walking routes with hard road avoidance.</div></div>
+      <div class="help-section">During a run</div>
+      <div class="help-item"><span class="help-icon">🔊</span><div><strong>Voice</strong> — mutes or unmutes the spoken directions and kilometre splits.</div></div>
+      <div class="help-item"><span class="help-icon">🧪</span><div><strong>Simulate</strong> — previews the whole guided run with a phantom runner, no GPS needed. Saved simulated runs are tagged <em>sim</em>.</div></div>
+      <div class="help-item"><span class="help-icon">■</span><div><strong>End run</strong> — stops the run and shows your distance, time and pace, with the option to save or discard.</div></div>
+    </div>
+    <div class="btn-grid">
+      <button id="btn-help-back" class="btn btn-ghost btn-wide"><span class="btn-icon">←</span>Back</button>
     </div>
   </div>
 

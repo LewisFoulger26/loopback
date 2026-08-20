@@ -415,6 +415,48 @@ html, body {
 .icon-btn.viewing { background: #e0e7ff; border-color: #a5b4fc; }
 .icon-btn.danger:hover { background: #fee2e2; border-color: #fca5a5; }
 
+/* ------------------------------------------------------------------- help */
+
+.help-btn {
+  margin-left: auto;
+  font-weight: 800;
+  color: var(--ink-soft);
+}
+
+.help-list {
+  max-height: 56vh;
+  overflow-y: auto;
+  margin: 2px 0 4px;
+}
+
+.help-section {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 10px 0 4px;
+}
+
+.help-section:first-child { margin-top: 0; }
+
+.help-item {
+  display: flex;
+  gap: 10px;
+  padding: 6px 2px;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+
+.help-item strong { color: var(--ink); }
+
+.help-icon {
+  flex: 0 0 22px;
+  text-align: center;
+  font-size: 0.95rem;
+}
+
 .toast {
   position: absolute;
   top: 14px;
